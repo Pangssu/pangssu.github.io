@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TERRA</title>
+    <style>
+        html, body {
+            padding: 10px;
+            background-color: #212529 !important;
+            color: #ffffff !important;
+            text-align: center !important;
+        }
+
+        h5 {}
+    </style>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <script type="text/javascript">
+        var LUNAKRW;
+        var MINEUSDT;
+        var MINEKRW;
+        
+        var assets = [];
+        
+        fetch();
+
+        function getAddress() {
+            var address = localStorage.getItem('address');
+
+            if(!address || address.substr(0, 5) !== 'terra') {
+                localStorage.setItem('address', prompt('지갑주소 입력'));
+                address = getAddress();
+            }
+
+            return address;
+        }
+
+        function getLUNAKRW() {
+            return $.ajax({
+                url: 'https://api.bithumb.com/public/ticker/LUNA_KRW', 
+                success: function(res) {
+                    LUNAKRW = res.data['closing_price'];
+                    $('#lunakrw').html('₩ ' + (+LUNAKRW).toLocaleString());
+                },
+                error: function() {
+                    alert('빗썸 루나 가격 조회 실패');
+                }
+            });
+        }
+
+        function getMINEKRW() {
+            return $.ajax({
+                url: 'https://www.coinbase.com/api/v2/assets/prices/e23d25a8-1f29-596a-a366-7e00fbf16d3b?base=KRW',
+                success: function(res) {
+                    MINEKRW = res.data.prices.latest;
+                    $('#minekrw').html('₩ ' + (+MINEKRW).toLocaleString());
+                }
+            })
+        }
+
+        function getMINEUSDT() {
+            return $.ajax({
+                url: 'https://www.coinbase.com/api/v2/assets/prices/e23d25a8-1f29-596a-a366-7e00fbf16d3b?base=USDT',
+                success: function(res) {
+                    MINEUSDT = res.data.prices.latest;
+                    $('#mineusdt').html('$ ' + (+MINEUSDT).toLocaleString());
+                }
+            })
+        }
+
+        function getTerraBalance(address) {
+            return $.ajax({
+                url: 'https://fcd.terra.dev/v1/bank/' + address,
+                success: function(res) {
+                    assets = assets.concat(res.balance.map(function(x) {
+                        var symbol = '';
+                        var balance = x.available;
+
+                        switch(x.denom) {
+                            case 'uluna':
+                                symbol = 'LUNA';
+                                break;
+                            case 'uusd':
+                                symbol = 'UST';
+                                break;
+                            case 'ukrw':
+                                symbol = 'KRT';
+                                break;
+                        }
+                        
+                        return {symbol: symbol, balance: balance/10**6};
+                    }));
+                },
+                error: function() {
+                    alert('테라 네트워크 내 잔고 조회 실패');
+                }
+            });
+        }
+
+        function getMINEBalance(address) {
+            var queryMsg = encodeURIComponent(btoa('{"balance":{"address":"' + address + '"}}'));
+
+            var url = 'https://lcd.terra.dev/terra/wasm/v1beta1/contracts/terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy/store?query_msg=' + queryMsg;
+            return $.ajax({
+                url: url,
+                success: function(res) {
+                    assets.push({
+                        symbol: 'MINE',
+                        balance: res['query_result'].balance/10**6
+                    });
+                },
+                error: function() {
+                    alert('MINE 잔고 조회 실패');
+                }
+            })
+        }
+
+        function getStakedMINEBalance(address) {
+            var queryMsg = encodeURIComponent('{"staker":{"address":"' + address + '"}}');
+
+            var url = 'https://lcd.terra.dev/wasm/contracts/terra1xu8utj38xuw6mjwck4n97enmavlv852zkcvhgp/store?query_msg=' + queryMsg;
+            return $.ajax({
+                url: url,
+                success: function(res) {
+                    assets.push({
+                        symbol: 'MINE',
+                        staked: true,
+                        balance: res.result.balance/10**6
+                    });
+                },
+                error: function() {
+                    alert('Staked MINE 잔고 조회 실패');
+                }
+            })
+        }
+
+        function fetch() {
+            var address = getAddress();
+
+            assets = [];
+            LUNAKRW = undefined;
+            MINEKRW = undefined;
+            MINEUSDT = undefined;
+
+            Promise.all([
+                getLUNAKRW(),
+                getMINEKRW(),
+                getMINEUSDT(),
+                getTerraBalance(address),
+                getMINEBalance(address),
+                getStakedMINEBalance(address),
+            ]).then(function() {
+                var values = 0;
+
+                for(var i in assets) {
+                    var asset = assets[i];
+
+                    $('#b_' + (asset.staked ? 's' : '') + asset.symbol.toLowerCase()).html(asset.balance);
+
+                    if(asset.symbol === 'LUNA') {
+                        v = Math.floor(asset.balance * LUNAKRW);
+                        values += v;
+
+                        $('#v_luna').html('₩ ' + v.toLocaleString());
+                    } else if(asset.symbol === 'MINE') {
+                        v = Math.floor(asset.balance * MINEKRW);
+                        values += v;
+
+                        $(asset.staked ? '#v_smine' : '#v_mine').html('₩ ' + v.toLocaleString());
+                    }
+                }
+
+                $('#total_krw').html(values.toLocaleString());
+            });
+        }
+    </script>
+</head>
+<body>
+    <div>
+        <h5>Price</h3>
+        <table class="table table-dark">
+            <thead>
+                <tr>
+                    <th>LUNA-KRW</th>
+                    <th>MINE-KRW</th>
+                    <th>MINE-USDT</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td id="lunakrw">₩ -</td>
+                    <td id="minekrw">₩ -</td>
+                    <td id="mineusdt">$ -</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <br/>
+    <br/>
+    <div>
+        <h5>Balance</h3>
+        <table class="table table-dark">
+            <thead>
+                <tr>
+                    <th>LUNA</th>
+                    <th>UST</th>
+                    <th>MINE</th>
+                    <th>MINE (Staked)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td id="b_luna"></td>
+                    <td id="b_ust"></td>
+                    <td id="b_mine"></td>
+                    <td id="b_smine"></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <br/>
+    <br/>
+    <div>
+        <h5>Values</h3>
+        <table class="table table-dark">
+            <thead>
+                <tr>
+                    <th>LUNA</th>
+                    <th>MINE</th>
+                    <th>MINE (Staked)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td id="v_luna"></td>
+                    <td id="v_mine"></td>
+                    <td id="v_smine"></td>
+                </tr>
+            </tbody>
+        </table>
+        <h4>Total: ₩ <span id="total_krw"></span></h3>
+    </div>
+</body>
+</html>
